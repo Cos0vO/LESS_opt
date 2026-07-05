@@ -192,6 +192,153 @@ int generator_RREF_prefix_infoset_or_fallback(generator_mat_t *G,
    return generator_RREF(G, is_pivot_column);
 } /* end generator_RREF_prefix_infoset_or_fallback */
 
+static int generator_find_information_set(const generator_mat_t *G,
+                                          POSITION_T info_set[K]) {
+   generator_mat_t work;
+   memcpy(&work, G, sizeof(work));
+
+   uint32_t rank = 0;
+   for(uint32_t col = 0; (col < N) && (rank < K); col++) {
+      uint32_t pivot_row = rank;
+      while ((pivot_row < K) && (work.values[pivot_row][col] == 0)) {
+         pivot_row++;
+      }
+
+      if (pivot_row >= K) {
+         continue;
+      }
+
+      if (pivot_row != rank) {
+         swap_rows(work.values[rank], work.values[pivot_row]);
+      }
+
+      const FQ_ELEM scaling_factor = fq_inv(work.values[rank][col]);
+      for(uint32_t col_idx = col; col_idx < N; col_idx++) {
+         work.values[rank][col_idx] = fq_mul(scaling_factor, work.values[rank][col_idx]);
+      }
+
+      for(uint32_t row_idx = rank + 1; row_idx < K; row_idx++) {
+         const FQ_ELEM multiplier = work.values[row_idx][col];
+         for(uint32_t col_idx = col; col_idx < N; col_idx++) {
+            const FQ_ELEM tmp = fq_mul(multiplier, work.values[rank][col_idx]);
+            work.values[row_idx][col_idx] = fq_sub(work.values[row_idx][col_idx], tmp);
+         }
+      }
+
+      info_set[rank] = col;
+      rank++;
+   }
+
+   return rank == K;
+}
+
+static int invert_selected_columns(FQ_ELEM inverse[K][K],
+                                   const generator_mat_t *G,
+                                   const POSITION_T info_set[K]) {
+   FQ_ELEM left[K][K];
+
+   for(uint32_t row = 0; row < K; row++) {
+      for(uint32_t col = 0; col < K; col++) {
+         left[row][col] = G->values[row][info_set[col]];
+         inverse[row][col] = row == col;
+      }
+   }
+
+   for(uint32_t col = 0; col < K; col++) {
+      uint32_t pivot_row = col;
+      while ((pivot_row < K) && (left[pivot_row][col] == 0)) {
+         pivot_row++;
+      }
+
+      if (pivot_row >= K) {
+         return 0;
+      }
+
+      if (pivot_row != col) {
+         for(uint32_t j = 0; j < K; j++) {
+            FQ_ELEM tmp = left[col][j];
+            left[col][j] = left[pivot_row][j];
+            left[pivot_row][j] = tmp;
+
+            tmp = inverse[col][j];
+            inverse[col][j] = inverse[pivot_row][j];
+            inverse[pivot_row][j] = tmp;
+         }
+      }
+
+      const FQ_ELEM scaling_factor = fq_inv(left[col][col]);
+      for(uint32_t j = 0; j < K; j++) {
+         left[col][j] = fq_mul(scaling_factor, left[col][j]);
+         inverse[col][j] = fq_mul(scaling_factor, inverse[col][j]);
+      }
+
+      for(uint32_t row = 0; row < K; row++) {
+         if (row != col) {
+            const FQ_ELEM multiplier = left[row][col];
+            for(uint32_t j = 0; j < K; j++) {
+               FQ_ELEM tmp = fq_mul(multiplier, left[col][j]);
+               left[row][j] = fq_sub(left[row][j], tmp);
+
+               tmp = fq_mul(multiplier, inverse[col][j]);
+               inverse[row][j] = fq_sub(inverse[row][j], tmp);
+            }
+         }
+      }
+   }
+
+   return 1;
+}
+
+int generator_RREF_infoset_systematic(generator_mat_t *G,
+                                      uint8_t is_pivot_column[N]) {
+   POSITION_T info_set[K];
+   FQ_ELEM inverse[K][K];
+   generator_mat_t systematic = {0};
+
+   memset(is_pivot_column, 0, N);
+
+   if (!generator_find_information_set(G, info_set)) {
+      return 0;
+   }
+
+   if (!invert_selected_columns(inverse, G, info_set)) {
+      return 0;
+   }
+
+   for(uint32_t row = 0; row < K; row++) {
+      for(uint32_t col = 0; col < N; col++) {
+         FQ_ELEM acc = 0;
+         for(uint32_t inner = 0; inner < K; inner++) {
+            acc = fq_add(acc, fq_mul(inverse[row][inner], G->values[inner][col]));
+         }
+         systematic.values[row][col] = acc;
+      }
+   }
+
+   for(uint32_t idx = 0; idx < K; idx++) {
+      is_pivot_column[info_set[idx]] = 1;
+   }
+
+   memcpy(G, &systematic, sizeof(systematic));
+   return 1;
+} /* end generator_RREF_infoset_systematic */
+
+int generator_RREF_infoset_systematic_or_fallback(generator_mat_t *G,
+                                                  uint8_t is_pivot_column[N]) {
+   generator_mat_t candidate;
+   uint8_t candidate_pivots[N_pad] = {0};
+   memcpy(&candidate, G, sizeof(candidate));
+
+   if (generator_RREF_infoset_systematic(&candidate, candidate_pivots)) {
+      memcpy(G, &candidate, sizeof(candidate));
+      memcpy(is_pivot_column, candidate_pivots, N);
+      return 1;
+   }
+
+   memset(is_pivot_column, 0, N);
+   return generator_RREF(G, is_pivot_column);
+} /* end generator_RREF_infoset_systematic_or_fallback */
+
 /// \param G[in/out]: generator matrix K \times N
 /// \param is_pivot_column[out]: N bytes, set to 1 if this column
 ///                 is a pivot column

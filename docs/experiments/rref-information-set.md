@@ -46,6 +46,23 @@ The experiment does not change keygen, sign, or verify defaults.
   baseline.
 - The protocol default remains unchanged.
 
+### 2026-07-05 - Step 4: General information-set/systematic baseline
+
+- Added experimental `generator_RREF_infoset_systematic()` and
+  `generator_RREF_infoset_systematic_or_fallback()`.
+- The new path first finds an information set by the same left-to-right
+  rank-profile rule used by ordinary RREF. This is important: arbitrary
+  information-set choice can produce a valid systematic generator matrix, but not
+  necessarily the canonical RREF expected by compression/canonical paths.
+- After selecting the pivot set, the path inverts the selected `K x K` submatrix
+  and left-multiplies the full `K x N` matrix to systematize all selected pivot
+  columns at once.
+- The reference and optimized/common implementations currently use a scalar
+  baseline for this general systematic path. The optimized prefix special case
+  remains SIMD-vectorized.
+- `LESS_keygen/sign/verify` are still unchanged; this is only an experiment
+  side path plus benchmark hook.
+
 ## Verification Results
 
 ### 2026-07-05 - Build and unit tests
@@ -63,6 +80,27 @@ The experiment does not change keygen, sign, or verify defaults.
 - `cmake --build build-neon-rref-info --target LESS_test_cat_252_192 LESS_test_cat_252_68 LESS_test_cat_252_45 LESS_test_cat_400_220 LESS_test_cat_400_102 LESS_test_cat_548_345 LESS_test_cat_548_137 -j4`
 - `ctest --test-dir build-neon-rref-info -R '^LESS_test_cat_' --output-on-failure`
   - Result: pass, 7/7 tests passed.
+
+### 2026-07-05 - General systematic path verification
+
+- `cmake --build build-ref-rref-info --target LESS_test_cat_252_192 -j4`
+- `./build-ref-rref-info/LESS_test_cat_252_192`
+  - Result: pass.
+  - New test output: `RREF infoset systematic: ok (random checked 32, monomial checked 32)`.
+- `cmake --build build-neon-rref-info --target LESS_test_cat_252_192 -j4`
+- `./build-neon-rref-info/LESS_test_cat_252_192`
+  - Result: pass.
+  - New test output: `RREF infoset systematic: ok (random checked 32, monomial checked 32)`.
+- `cmake --build build-neon-rref-info --target LESS_test_cat_252_192 LESS_test_cat_252_68 LESS_test_cat_252_45 LESS_test_cat_400_220 LESS_test_cat_400_102 LESS_test_cat_548_345 LESS_test_cat_548_137 -j4`
+- `ctest --test-dir build-neon-rref-info -R '^LESS_test_cat_' --output-on-failure`
+  - Result: pass, 7/7 tests passed.
+- `cmake --build build-neon-rref-info --target LESS_benchmark_cat_252_192 -j4`
+  - Result: pass.
+- Manual compile-only checks for standalone `bench_rref.c`:
+  - optimized/common neon flags, `CATEGORY=252`, `TARGET=192`: pass.
+  - reference flags, `CATEGORY=252`, `TARGET=192`: pass.
+- `git diff --check -- . ':(exclude).gitignore'`
+  - Result: pass.
 
 ### 2026-07-05 - Benchmark attempt
 
@@ -110,5 +148,9 @@ trying the shortcut and from fallback cases that run both paths.
 
 - The shortcut is mathematically valid only when the prefix `K x K` block is
   invertible. It is not a replacement for arbitrary information-set selection.
-- The optimized implementation currently uses the scalar baseline for the new
-  side path. If the shortcut proves useful, a follow-up can vectorize this path.
+- The prefix shortcut is now one special case. The general systematic path can
+  use a later information set, but to remain a drop-in RREF equivalent it must
+  select the same left-to-right rank profile as the current RREF.
+- The optimized implementation currently uses a scalar baseline for the general
+  systematic side path. If this proves useful, a follow-up can vectorize the
+  `K x K` inversion and full-matrix multiplication.

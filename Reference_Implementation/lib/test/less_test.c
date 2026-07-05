@@ -240,6 +240,102 @@ static int rref_prefix_infoset_tester(void) {
     return 0;
 }
 
+static int rref_infoset_systematic_check_case(const generator_mat_t *input,
+                                              const char *label) {
+    generator_mat_t ref;
+    generator_mat_t systematic;
+    uint8_t ref_pivots[NN] = {0};
+    uint8_t systematic_pivots[NN] = {0};
+
+    memcpy(&ref, input, sizeof(ref));
+    memcpy(&systematic, input, sizeof(systematic));
+
+    const int ref_ok = generator_RREF(&ref, ref_pivots);
+    const int systematic_ok =
+            generator_RREF_infoset_systematic(&systematic, systematic_pivots);
+
+    if (ref_ok != systematic_ok) {
+        printf("RREF infoset systematic rank mismatch: %s\n", label);
+        return 0;
+    }
+
+    if (!ref_ok) {
+        return 1;
+    }
+
+    if (!generator_active_equal(&ref, &systematic) ||
+        !pivot_flags_equal(ref_pivots, systematic_pivots)) {
+        printf("RREF infoset systematic equivalence failed: %s\n", label);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int rref_infoset_systematic_tester(void) {
+    enum { RREF_INFOSET_ITERS = 32 };
+
+    init_randombytes((const unsigned char *)"rref_systematic_test", 16);
+
+    for (uint32_t iter = 0; iter < RREF_INFOSET_ITERS; iter++) {
+        generator_mat_t G = {0};
+        generator_rnd(&G);
+        if (!rref_infoset_systematic_check_case(&G, "random")) {
+            return 1;
+        }
+    }
+
+    for (uint32_t iter = 0; iter < RREF_INFOSET_ITERS; iter++) {
+        generator_mat_t base = {0};
+        generator_mat_t base_rref = {0};
+        generator_mat_t transformed = {0};
+        uint8_t pivots[NN] = {0};
+        monomial_t monom;
+
+        do {
+            generator_rnd(&base);
+            memcpy(&base_rref, &base, sizeof(base_rref));
+            memset(pivots, 0, sizeof(pivots));
+        } while (generator_RREF(&base_rref, pivots) == 0);
+
+        monomial_mat_rnd(&monom);
+        generator_monomial_mul(&transformed, &base, &monom);
+        if (!rref_infoset_systematic_check_case(&transformed, "monomial")) {
+            return 1;
+        }
+    }
+
+    generator_mat_t shifted_identity = {0};
+    generator_mat_t ref = {0};
+    generator_mat_t wrapped = {0};
+    uint8_t ref_pivots[NN] = {0};
+    uint8_t wrapped_pivots[NN] = {0};
+
+    for (uint32_t row = 0; row < K; row++) {
+        shifted_identity.values[row][row + 1] = 1;
+    }
+
+    if (!rref_infoset_systematic_check_case(&shifted_identity,
+                                            "shifted identity")) {
+        return 1;
+    }
+
+    memcpy(&ref, &shifted_identity, sizeof(ref));
+    memcpy(&wrapped, &shifted_identity, sizeof(wrapped));
+    if (generator_RREF(&ref, ref_pivots) == 0 ||
+        generator_RREF_infoset_systematic_or_fallback(&wrapped, wrapped_pivots) == 0 ||
+        !generator_active_equal(&ref, &wrapped) ||
+        !pivot_flags_equal(ref_pivots, wrapped_pivots)) {
+        printf("RREF infoset systematic wrapper failed\n");
+        return 1;
+    }
+
+    printf("RREF infoset systematic: ok (random checked %u, monomial checked %u)\n",
+           RREF_INFOSET_ITERS,
+           RREF_INFOSET_ITERS);
+    return 0;
+}
+
 /*
  *
  */
@@ -356,6 +452,9 @@ int main(int argc, char* argv[]){
     (void)argv;
     // LESS_sign_verify_test_multiple();
     if (rref_prefix_infoset_tester()) {
+        return 1;
+    }
+    if (rref_infoset_systematic_tester()) {
         return 1;
     }
     return LESS_sign_verify_test_KAT();
