@@ -292,40 +292,78 @@ int generator_RREF(generator_mat_t *G, uint8_t is_pivot_column[N_pad]) {
 
 int generator_RREF_prefix_infoset(generator_mat_t *G,
                                   uint8_t is_pivot_column[N_pad]) {
+    int i, j;
+    uint8_t tmp, sc;
+
+    vec256_t *gm[K] __attribute__((aligned(32)));
+    vec256_t em[0x80][NW];
+    vec256_t *ep[0x80];
+    vec256_t c01, c7f;
+    vec256_t x, t, *rp, *rg;
+
+    vset8(c01, 0x01);
+    vset8(c7f, 0x7f);
+
     memset(is_pivot_column, 0, N_pad);
 
-    for (uint32_t col = 0; col < K; col++) {
-        uint32_t pivot_row = col;
-        while ((pivot_row < K) && (G->values[pivot_row][col] == 0)) {
-            pivot_row++;
+    for (i = 0; i < K; i++) {
+        gm[i] = (vec256_t *) G->values[i];
+    }
+
+    for (i = 0; i < K; i++) {
+        j = i;
+        while ((j < K) && (G->values[j][i] == 0)) {
+            j++;
         }
 
-        if (pivot_row >= K) {
+        if (j >= K) {
             return 0;
         }
 
-        if (pivot_row != col) {
-            swap_rows(G->values[col], G->values[pivot_row]);
+        is_pivot_column[i] = 1;
+
+        if (i != j) {
+            for (uint32_t k = 0; k < NW; k++) {
+                t = gm[i][k];
+                gm[i][k] = gm[j][k];
+                gm[j][k] = t;
+            }
         }
 
-        const FQ_ELEM scaling_factor = fq_inv(G->values[col][col]);
-        for (uint32_t col_idx = col; col_idx < N; col_idx++) {
-            G->values[col][col_idx] = fq_mul(scaling_factor, G->values[col][col_idx]);
+        rg = gm[i];
+        memcpy(em[1], rg, LESS_WSZ * NW);
+
+        for (j = 2; j < 127; j++) {
+            for (uint32_t k = 0; k < NW; k++) {
+                vadd8(x, em[j - 1][k], rg[k])
+                W_RED127_(x);
+                em[j][k] = x;
+            }
         }
 
-        for (uint32_t row_idx = 0; row_idx < K; row_idx++) {
-            if (row_idx != col) {
-                const FQ_ELEM multiplier = G->values[row_idx][col];
-                for (uint32_t col_idx = col; col_idx < N; col_idx++) {
-                    const FQ_ELEM tmp = fq_mul(multiplier, G->values[col][col_idx]);
-                    G->values[row_idx][col_idx] = fq_sub(G->values[row_idx][col_idx], tmp);
+        sc = ((uint8_t *) rg)[i];
+        ep[0] = em[0];
+        tmp = sc;
+        for (j = 1; j < 127; j++) {
+            ep[tmp] = em[j];
+            tmp += sc;
+            tmp = (tmp + (tmp >> 7)) & 0x7F;
+        }
+        ep[0x7F] = em[0];
+
+        memcpy(rg, ep[1], LESS_WSZ * NW);
+
+        for (j = 0; j < K; j++) {
+            sc = ((uint8_t *) gm[j])[i] & 0x7F;
+            if (j != i && (sc != 0x00)) {
+                rp = ep[127 - sc];
+                for (uint32_t k = 0; k < NW; k++) {
+                    vadd8(x, gm[j][k], rp[k])
+                    W_RED127_(x);
+                    gm[j][k] = x;
                 }
             }
         }
-    }
-
-    for (uint32_t col = 0; col < K; col++) {
-        is_pivot_column[col] = 1;
     }
 
     return 1;

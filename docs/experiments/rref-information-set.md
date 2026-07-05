@@ -37,6 +37,15 @@ The experiment does not change keygen, sign, or verify defaults.
   - wrapper average cycles,
   - wrapper/current RREF cycle ratio.
 
+### 2026-07-05 - Step 3: Optimized SIMD prefix path
+
+- Replaced the optimized/common prefix shortcut's scalar row operations with the
+  same SIMD multiple-table normalization and elimination structure used by
+  `generator_RREF()`.
+- Kept the reference implementation scalar so it remains a readable correctness
+  baseline.
+- The protocol default remains unchanged.
+
 ## Verification Results
 
 ### 2026-07-05 - Build and unit tests
@@ -80,6 +89,22 @@ monomial-transformed full-rank matrices, but the current scalar shortcut wrapper
 is slower than the existing SIMD RREF path. This is a negative performance
 result for direct default-path adoption, while still leaving a possible follow-up
 for vectorizing the prefix path.
+
+### 2026-07-05 - SIMD prefix wall-clock benchmark
+
+After SIMD-vectorizing the optimized/common prefix shortcut, using the same
+temporary wall-clock harness and 1024 iterations per parameter set:
+
+| Category/Target | Normal RREF avg | Prefix wrapper avg | Shortcut successes | Factor |
+| --- | ---: | ---: | ---: | ---: |
+| 252/192 | 261495 ns | 264288 ns | 1022/1024 | 1.011 |
+| 400/220 | 781659 ns | 780851 ns | 1014/1024 | 0.999 |
+| 548/345 | 1906421 ns | 1988162 ns | 1018/1024 | 1.043 |
+
+Interpretation: vectorizing the prefix path removes nearly all of the earlier
+regression. The wrapper is roughly at parity with normal RREF, but not a clear
+win. The remaining overhead is likely from copying the candidate matrix before
+trying the shortcut and from fallback cases that run both paths.
 
 ## Notes
 
