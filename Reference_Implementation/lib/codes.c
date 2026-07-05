@@ -135,6 +135,63 @@ int generator_RREF(generator_mat_t *G,
    return 1;
 } /* end generator_RREF */
 
+int generator_RREF_prefix_infoset(generator_mat_t *G,
+                                  uint8_t is_pivot_column[N]) {
+   memset(is_pivot_column, 0, N);
+
+   for(uint32_t col = 0; col < K; col++) {
+      uint32_t pivot_row = col;
+      while ((pivot_row < K) && (G->values[pivot_row][col] == 0)) {
+         pivot_row++;
+      }
+
+      if (pivot_row >= K) {
+         return 0;
+      }
+
+      if (pivot_row != col) {
+         swap_rows(G->values[col], G->values[pivot_row]);
+      }
+
+      const FQ_ELEM scaling_factor = fq_inv(G->values[col][col]);
+      for(uint32_t col_idx = col; col_idx < N; col_idx++) {
+         G->values[col][col_idx] = fq_mul(scaling_factor, G->values[col][col_idx]);
+      }
+
+      for(uint32_t row_idx = 0; row_idx < K; row_idx++) {
+         if (row_idx != col) {
+            const FQ_ELEM multiplier = G->values[row_idx][col];
+            for(uint32_t col_idx = col; col_idx < N; col_idx++) {
+               const FQ_ELEM tmp = fq_mul(multiplier, G->values[col][col_idx]);
+               G->values[row_idx][col_idx] = fq_sub(G->values[row_idx][col_idx], tmp);
+            }
+         }
+      }
+   }
+
+   for(uint32_t col = 0; col < K; col++) {
+      is_pivot_column[col] = 1;
+   }
+
+   return 1;
+} /* end generator_RREF_prefix_infoset */
+
+int generator_RREF_prefix_infoset_or_fallback(generator_mat_t *G,
+                                              uint8_t is_pivot_column[N]) {
+   generator_mat_t candidate;
+   uint8_t candidate_pivots[N_pad] = {0};
+   memcpy(&candidate, G, sizeof(candidate));
+
+   if (generator_RREF_prefix_infoset(&candidate, candidate_pivots)) {
+      memcpy(G, &candidate, sizeof(candidate));
+      memcpy(is_pivot_column, candidate_pivots, N);
+      return 1;
+   }
+
+   memset(is_pivot_column, 0, N);
+   return generator_RREF(G, is_pivot_column);
+} /* end generator_RREF_prefix_infoset_or_fallback */
+
 /// \param G[in/out]: generator matrix K \times N
 /// \param is_pivot_column[out]: N bytes, set to 1 if this column
 ///                 is a pivot column

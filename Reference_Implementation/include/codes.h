@@ -73,6 +73,12 @@ void generator_monomial_mul(generator_mat_t *res,
 int generator_RREF(generator_mat_t *G,
                    uint8_t is_pivot_column[N_pad]);
 
+int generator_RREF_prefix_infoset(generator_mat_t *G,
+                                  uint8_t is_pivot_column[N_pad]);
+
+int generator_RREF_prefix_infoset_or_fallback(generator_mat_t *G,
+                                              uint8_t is_pivot_column[N_pad]);
+
 int generator_RREF_pivot_reuse(generator_mat_t *G,
                                  uint8_t is_pivot_column[N],
                                  uint8_t was_pivot_column[N],

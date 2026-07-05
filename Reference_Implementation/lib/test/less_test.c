@@ -125,6 +125,121 @@ void rref_gen_byte_compress_tester(void){
     }
 }
 
+static int generator_active_equal(const generator_mat_t *A,
+                                  const generator_mat_t *B) {
+    for (uint32_t row = 0; row < K; row++) {
+        for (uint32_t col = 0; col < N; col++) {
+            if (A->values[row][col] != B->values[row][col]) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static int pivot_flags_equal(const uint8_t *A,
+                             const uint8_t *B) {
+    for (uint32_t col = 0; col < N; col++) {
+        if (A[col] != B[col]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int rref_prefix_check_case(const generator_mat_t *input,
+                                  unsigned *shortcut_successes,
+                                  const char *label) {
+    generator_mat_t ref;
+    generator_mat_t shortcut;
+    uint8_t ref_pivots[NN] = {0};
+    uint8_t shortcut_pivots[NN] = {0};
+
+    memcpy(&ref, input, sizeof(ref));
+    memcpy(&shortcut, input, sizeof(shortcut));
+
+    const int ref_ok = generator_RREF(&ref, ref_pivots);
+    const int shortcut_ok = generator_RREF_prefix_infoset(&shortcut, shortcut_pivots);
+
+    if (!shortcut_ok) {
+        return 1;
+    }
+
+    *shortcut_successes += 1;
+    if (!ref_ok ||
+        !generator_active_equal(&ref, &shortcut) ||
+        !pivot_flags_equal(ref_pivots, shortcut_pivots)) {
+        printf("RREF prefix infoset equivalence failed: %s\n", label);
+        return 0;
+    }
+
+    return 1;
+}
+
+static int rref_prefix_infoset_tester(void) {
+    enum { RREF_INFOSET_ITERS = 32 };
+    unsigned random_successes = 0;
+    unsigned monomial_successes = 0;
+
+    init_randombytes((const unsigned char *)"rref_infoset_test", 16);
+
+    for (uint32_t iter = 0; iter < RREF_INFOSET_ITERS; iter++) {
+        generator_mat_t G = {0};
+        generator_rnd(&G);
+        if (!rref_prefix_check_case(&G, &random_successes, "random")) {
+            return 1;
+        }
+    }
+
+    for (uint32_t iter = 0; iter < RREF_INFOSET_ITERS; iter++) {
+        generator_mat_t base = {0};
+        generator_mat_t base_rref = {0};
+        generator_mat_t transformed = {0};
+        uint8_t pivots[NN] = {0};
+        monomial_t monom;
+
+        do {
+            generator_rnd(&base);
+            memcpy(&base_rref, &base, sizeof(base_rref));
+            memset(pivots, 0, sizeof(pivots));
+        } while (generator_RREF(&base_rref, pivots) == 0);
+
+        monomial_mat_rnd(&monom);
+        generator_monomial_mul(&transformed, &base, &monom);
+        if (!rref_prefix_check_case(&transformed, &monomial_successes, "monomial")) {
+            return 1;
+        }
+    }
+
+    generator_mat_t fallback_input = {0};
+    generator_mat_t ref = {0};
+    generator_mat_t wrapped = {0};
+    uint8_t ref_pivots[NN] = {0};
+    uint8_t wrapped_pivots[NN] = {0};
+
+    for (uint32_t row = 0; row < K; row++) {
+        fallback_input.values[row][row + 1] = 1;
+    }
+
+    memcpy(&ref, &fallback_input, sizeof(ref));
+    memcpy(&wrapped, &fallback_input, sizeof(wrapped));
+
+    if (generator_RREF(&ref, ref_pivots) == 0 ||
+        generator_RREF_prefix_infoset_or_fallback(&wrapped, wrapped_pivots) == 0 ||
+        !generator_active_equal(&ref, &wrapped) ||
+        !pivot_flags_equal(ref_pivots, wrapped_pivots)) {
+        printf("RREF prefix infoset fallback failed\n");
+        return 1;
+    }
+
+    printf("RREF prefix infoset: ok (random success %u/%u, monomial success %u/%u)\n",
+           random_successes,
+           RREF_INFOSET_ITERS,
+           monomial_successes,
+           RREF_INFOSET_ITERS);
+    return 0;
+}
+
 /*
  *
  */
@@ -240,5 +355,8 @@ int main(int argc, char* argv[]){
     (void)argc;
     (void)argv;
     // LESS_sign_verify_test_multiple();
+    if (rref_prefix_infoset_tester()) {
+        return 1;
+    }
     return LESS_sign_verify_test_KAT();
 }
